@@ -6,12 +6,12 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"net/http"
 	"time"
 	"unicode/utf8"
 
 	"github.com/sunls24/gox"
-	"github.com/sunls24/gox/client"
+	"github.com/sunls24/gox/network/client"
+	"github.com/sunls24/gox/network/header"
 	"github.com/tidwall/gjson"
 )
 
@@ -24,35 +24,32 @@ func New(baseURL, apiKey string) *OpenAI {
 	return &OpenAI{baseURL, apiKey}
 }
 
-func (oai *OpenAI) Chat(ctx context.Context, rc ReqChat) (string, error) {
-	const path = "/v1/chat/completions"
+const chatPath = "/chat/completions"
 
-	if err := rc.check(); err != nil {
+func (oai *OpenAI) Chat(ctx context.Context, rc ReqChat) (string, error) {
+	if err := rc.check(false); err != nil {
 		return "", err
 	}
-
-	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, oai.baseURL+path, client.NewBody(rc))
-	req.Header.Add("Content-Type", "application/json")
-	req.Header.Add("Authorization", fmt.Sprintf("Bearer %s", oai.apiKey))
-
-	if rc.Stream {
-		stream, err := client.DoStream(req)
-		if err != nil {
-			return "", err
-		}
-
-		if rc.OnStart != nil {
-			rc.OnStart()
-		}
-		return "", streamLoop(ctx, stream, rc.OnStream)
-	}
-
-	body, err := client.Do(req)
+	body, err := client.Post(ctx, oai.baseURL+chatPath, rc, header.ContentTypeJson, header.Authorization(oai.apiKey))
 	if err != nil {
 		return "", err
 	}
-
 	return gjson.GetBytes(body, "choices.0.message.content").String(), nil
+}
+
+func (oai *OpenAI) ChatStream(ctx context.Context, rc ReqChat) error {
+	if err := rc.check(true); err != nil {
+		return err
+	}
+
+	reader, err := client.PostReader(ctx, oai.baseURL+chatPath, rc, header.ContentTypeJson, header.Authorization(oai.apiKey))
+	if err != nil {
+		return err
+	}
+	if rc.OnStart != nil {
+		rc.OnStart()
+	}
+	return streamLoop(reader, rc.OnStream)
 }
 
 var (
@@ -60,15 +57,14 @@ var (
 	sseDone   = []byte("[DONE]")
 )
 
-func streamLoop(ctx context.Context, stream io.ReadCloser, onStream StreamFunc) error {
+func streamLoop(stream io.ReadCloser, onStream StreamFunc) error {
 	const (
 		thinkStart = "<think>"
 		thinkEnd   = "</think>"
 	)
-
 	done := make(chan error, 1)
 	data := make(chan []byte, 1)
-	go fixedWrite(ctx, data, done, onStream)
+	go fixedWrite(data, done, onStream)
 
 	think := 0
 	scanner := bufio.NewScanner(stream)
@@ -90,7 +86,6 @@ func streamLoop(ctx context.Context, stream io.ReadCloser, onStream StreamFunc) 
 				think = 1
 			}
 		}
-
 		if content == "" {
 			content = gjson.GetBytes(line, "choices.0.delta.content").String()
 			if content == "" {
@@ -107,23 +102,19 @@ func streamLoop(ctx context.Context, stream io.ReadCloser, onStream StreamFunc) 
 		case err := <-done:
 			_ = stream.Close()
 			return err
-		case <-ctx.Done():
-			_ = stream.Close()
-			return ctx.Err()
 		}
 	}
-	_ = stream.Close()
 	close(data)
+	_ = stream.Close()
 	if err := <-done; err != nil {
 		return err
 	}
 	return scanner.Err()
 }
 
-func fixedWrite(ctx context.Context, data <-chan []byte, done chan<- error, onStream StreamFunc) {
+func fixedWrite(data <-chan []byte, done chan<- error, onStream StreamFunc) {
 	const maxLen = 64
 	const interval = time.Millisecond * 100
-
 	defer func() {
 		if err := recover(); err != nil {
 			done <- fmt.Errorf("%v", err)
@@ -131,16 +122,12 @@ func fixedWrite(ctx context.Context, data <-chan []byte, done chan<- error, onSt
 		close(done)
 	}()
 
-	buffer := make([]byte, 0, maxLen)
 	end := false
-
+	buffer := make([]byte, 0, maxLen)
 	tick := time.NewTicker(interval)
 	defer tick.Stop()
 	for {
 		select {
-		case <-ctx.Done():
-			done <- ctx.Err()
-			return
 		case b, ok := <-data:
 			if !ok {
 				data = nil
@@ -149,14 +136,17 @@ func fixedWrite(ctx context.Context, data <-chan []byte, done chan<- error, onSt
 			}
 			buffer = append(buffer, b...)
 		case <-tick.C:
-			if len(buffer) == 0 {
+			cut := len(buffer)
+			if cut == 0 {
 				if end {
 					return
 				}
 				continue
 			}
 
-			cut := gox.If(len(buffer) > maxLen, maxLen, len(buffer))
+			if cut > maxLen {
+				cut = maxLen + (cut-maxLen)/4
+			}
 			for cut > 0 && !utf8.Valid(buffer[:cut]) {
 				cut--
 			}
@@ -165,8 +155,7 @@ func fixedWrite(ctx context.Context, data <-chan []byte, done chan<- error, onSt
 			}
 
 			b := buffer[:cut]
-			buffer = buffer[len(b):]
-
+			buffer = buffer[cut:]
 			if err := onStream(b); err != nil {
 				done <- err
 				return

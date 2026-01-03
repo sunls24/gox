@@ -32,33 +32,39 @@ func AssistantMessage(content string) Message {
 	return NewMessage(RAssistant, content)
 }
 
-func SimplePrompt(user string, system string) []Message {
+func StartPrompt(user string, system string) []Message {
 	var list []Message
 	if system != "" {
 		list = append(list, SystemMessage(system))
 	}
-	list = append(list, UserMessage(user))
-	return list
+	return append(list, UserMessage(user))
 }
 
 type StreamFunc func(data []byte) error
 
 type ReqChat struct {
-	Stream      bool      `json:"stream"`
 	Model       string    `json:"model"`
 	Messages    []Message `json:"messages"`
 	Temperature float64   `json:"temperature"`
+	Stream      bool      `json:"stream"`
 
 	OnStream StreamFunc `json:"-"`
 	OnStart  func()     `json:"-"`
 }
 
-func (rc *ReqChat) check() error {
-	if rc.Stream && rc.OnStream == nil {
-		return errors.New("OnStream is required when stream is true")
+func (rc *ReqChat) check(stream bool) error {
+	if rc.Model == "" {
+		return errors.New("request model is required")
 	}
 	if len(rc.Messages) == 0 {
-		return errors.New("request messages is empty")
+		return errors.New("request messages is required")
+	}
+	if rc.Temperature < 0 {
+		rc.Temperature = 0
+	}
+	rc.Stream = stream
+	if stream && rc.OnStream == nil {
+		return errors.New("OnStream is required when stream is true")
 	}
 	return nil
 }

@@ -1,4 +1,4 @@
-package client
+package types
 
 type Pair[T any] struct {
 	Key   string

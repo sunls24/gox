@@ -9,10 +9,12 @@ import (
 
 func MD5(str string) string {
 	sum := md5.Sum(Str2Bytes(str))
-	return hex.EncodeToString(sum[:])
+	dst := make([]byte, hex.EncodedLen(len(sum)))
+	hex.Encode(dst, sum[:])
+	return Bytes2Str(dst)
 }
 
-func RandomStr(length int) string {
+func RandStr(length int) string {
 	const charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
 	b := make([]byte, length)
 	for i := range b {
