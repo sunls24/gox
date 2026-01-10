@@ -37,37 +37,37 @@ func RunDelayRepeat(fn func(), delay, dur time.Duration) {
 }
 
 func RunDay(fn func(), day int) {
-	RunSpecify(fn, day, 0, 0, 0)
+	RunSpecify(fn, day, -1, 0, 0)
 }
 
 func RunDayTime(fn func(), day, hour, min int) {
-	RunSpecify(fn, day, 0, hour, min)
+	RunSpecify(fn, day, -1, hour, min)
 }
 
-func RunWeek(fn func(), week int) {
-	RunSpecify(fn, 0, week, 0, 0)
+func RunWeek(fn func(), week time.Weekday) {
+	RunSpecify(fn, -1, week, 0, 0)
 }
 
-func RunWeekTime(fn func(), week, hour, min int) {
-	RunSpecify(fn, 0, week, hour, min)
+func RunWeekTime(fn func(), week time.Weekday, hour, min int) {
+	RunSpecify(fn, -1, week, hour, min)
 }
 
 func RunTime(fn func(), hour, min int) {
-	RunSpecify(fn, 0, 0, hour, min)
+	RunSpecify(fn, -1, -1, hour, min)
 }
 
-func RunSpecify(fn func(), day, week, hour, min int) {
+func RunSpecify(fn func(), day int, week time.Weekday, hour, min int) {
 	now := time.Now()
 	target := time.Date(now.Year(), now.Month(), now.Day(), hour, min, 0, 0, now.Location())
 	if target.Before(now) {
-		target.AddDate(0, 0, 1)
+		target = target.AddDate(0, 0, 1)
 	}
 	RunDelayRepeat(func() {
 		execTime := time.Now()
 		if day > 0 && execTime.Day() != day {
 			return
 		}
-		if week > 0 && int(execTime.Weekday()) != week {
+		if week >= 0 && execTime.Weekday() != week {
 			return
 		}
 		fn()
