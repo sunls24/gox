@@ -3,37 +3,54 @@ package gox
 import (
 	"crypto/md5"
 	"encoding/hex"
+	"fmt"
+	"log/slog"
 	"math/rand/v2"
-	"unsafe"
+	"runtime/debug"
 )
 
 func MD5(str string) string {
-	sum := md5.Sum(Str2Bytes(str))
-	dst := make([]byte, hex.EncodedLen(len(sum)))
-	hex.Encode(dst, sum[:])
-	return Bytes2Str(dst)
+	sum := md5.Sum([]byte(str))
+	return hex.EncodeToString(sum[:])
 }
 
 func RandStr(length int) string {
+	if length <= 0 {
+		return ""
+	}
 	const charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
 	b := make([]byte, length)
 	for i := range b {
 		b[i] = charset[rand.IntN(len(charset))]
 	}
-	return Bytes2Str(b)
+	return string(b)
 }
 
-func Str2Bytes(str string) []byte {
-	return unsafe.Slice(unsafe.StringData(str), len(str))
+func SafeGo(fn func()) {
+	go func() {
+		defer func() {
+			if err := recover(); err != nil {
+				slog.Error(fmt.Sprintf("SafeGo panic: %v\n%s", err, string(debug.Stack())))
+			}
+		}()
+		fn()
+	}()
 }
 
-func Bytes2Str(b []byte) string {
-	return unsafe.String(unsafe.SliceData(b), len(b))
+type Result[T any] struct {
+	Value T
+	Err   error
 }
 
-func If[T any](cond bool, a, b T) T {
-	if cond {
-		return a
-	}
-	return b
+func Async[T any](fn func() (T, error)) <-chan Result[T] {
+	ch := make(chan Result[T], 1)
+	go func() {
+		defer close(ch)
+		v, err := fn()
+		ch <- Result[T]{
+			Value: v,
+			Err:   err,
+		}
+	}()
+	return ch
 }

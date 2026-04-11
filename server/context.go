@@ -6,18 +6,33 @@ import (
 	"github.com/labstack/echo/v5"
 )
 
-type contextKey struct {
+func (srv *Server) ContextValue(key, value any) {
+	srv.contextValue[key] = value
 }
 
-func contextMiddleware(next echo.HandlerFunc) echo.HandlerFunc {
+func (srv *Server) NewValueContext() context.Context {
+	ctx := context.Background()
+	for k, v := range srv.contextValue {
+		ctx = context.WithValue(ctx, k, v)
+	}
+	return ctx
+}
+
+func (srv *Server) contextMiddleware(next echo.HandlerFunc) echo.HandlerFunc {
 	return func(c *echo.Context) error {
 		ctx := c.Request().Context()
-		ctx = context.WithValue(ctx, contextKey{}, c)
+		for k, v := range srv.contextValue {
+			ctx = context.WithValue(ctx, k, v)
+		}
+		ctx = context.WithValue(ctx, echoContextKey{}, c)
 		c.SetRequest(c.Request().WithContext(ctx))
 		return next(c)
 	}
 }
 
-func Context(ctx context.Context) *echo.Echo {
-	return ctx.Value(contextKey{}).(*echo.Echo)
+type echoContextKey struct {
+}
+
+func EchoContext(ctx context.Context) *echo.Context {
+	return ctx.Value(echoContextKey{}).(*echo.Context)
 }

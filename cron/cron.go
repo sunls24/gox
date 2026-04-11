@@ -4,18 +4,9 @@ import (
 	"fmt"
 	"log/slog"
 	"time"
-)
 
-func SafeGo(fn func()) {
-	go func() {
-		defer func() {
-			if err := recover(); err != nil {
-				slog.Error(fmt.Sprintf("SafeGo panic: %s", err))
-			}
-		}()
-		fn()
-	}()
-}
+	"github.com/sunls24/gox"
+)
 
 func RunRepeat(fn func(), dur time.Duration) {
 	if dur <= 0 {
@@ -26,7 +17,7 @@ func RunRepeat(fn func(), dur time.Duration) {
 	for {
 		select {
 		case <-ticker.C:
-			SafeGo(fn)
+			gox.SafeGo(fn)
 		}
 	}
 }
@@ -38,7 +29,7 @@ func RunDelayRepeat(fn func(), delay, dur time.Duration) {
 	if delay > 0 {
 		time.Sleep(delay)
 	}
-	SafeGo(fn)
+	gox.SafeGo(fn)
 	RunRepeat(fn, dur)
 }
 
@@ -64,14 +55,21 @@ func RunTime(fn func(), hour, min int) {
 
 func RunSpecify(fn func(), day int, week time.Weekday, hour, min int) {
 	if err := validateSpecifyArgs(day, week, hour, min); err != nil {
-		slog.Error("RunSpecify invalid args", "day", day, "week", week, "hour", hour, "minute", min, "error", err)
+		slog.Error("RunSpecify invalid args", slog.Any("err", err))
 		return
 	}
+	timer := time.NewTimer(nextSpecifyDelay(day, week, hour, min))
+	defer timer.Stop()
 	for {
-		target := nextSpecifyTime(time.Now(), day, week, hour, min)
-		<-time.After(time.Until(target))
-		SafeGo(fn)
+		<-timer.C
+		gox.SafeGo(fn)
+		timer.Reset(nextSpecifyDelay(day, week, hour, min))
 	}
+}
+
+func nextSpecifyDelay(day int, week time.Weekday, hour, min int) time.Duration {
+	now := time.Now()
+	return nextSpecifyTime(now, day, week, hour, min).Sub(now)
 }
 
 func nextSpecifyTime(now time.Time, day int, week time.Weekday, hour, min int) time.Time {
