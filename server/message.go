@@ -21,8 +21,12 @@ type Error struct {
 }
 
 func ErrMsg(msg string) *Error {
+	return ErrCode(-1, msg)
+}
+
+func ErrCode(code int, msg string) *Error {
 	return &Error{
-		code:       -1,
+		code:       code,
 		message:    msg,
 		statusCode: http.StatusOK,
 	}
