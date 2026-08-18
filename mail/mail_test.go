@@ -34,6 +34,29 @@ func TestBuildMessage(t *testing.T) {
 	}
 }
 
+func TestBuildHTMLMessage(t *testing.T) {
+	from := &stdmail.Address{Address: "sender@example.com"}
+	to := &stdmail.Address{Address: "user@example.com"}
+	message, err := buildHTMLMessage(from, to, "注册验证码", "验证码：123456", "<strong>123456</strong>")
+	if err != nil {
+		t.Fatalf("buildHTMLMessage() error = %v", err)
+	}
+	content := string(message)
+	for _, want := range []string{
+		"From: <sender@example.com>",
+		"To: <user@example.com>",
+		"Subject: =?UTF-8?q?",
+		"Content-Type: multipart/alternative; boundary=",
+		"Content-Type: text/plain; charset=UTF-8",
+		"Content-Type: text/html; charset=UTF-8",
+		"123456",
+	} {
+		if !strings.Contains(content, want) {
+			t.Errorf("message does not contain %q", want)
+		}
+	}
+}
+
 func TestSendCanceledContext(t *testing.T) {
 	client, err := New(Config{
 		Host:     "smtp.example.com",

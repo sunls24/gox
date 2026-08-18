@@ -7,10 +7,12 @@ import (
 	"errors"
 	"fmt"
 	"mime"
+	"mime/multipart"
 	"mime/quotedprintable"
 	"net"
 	stdmail "net/mail"
 	"net/smtp"
+	"net/textproto"
 	"strconv"
 	"strings"
 	"time"
@@ -59,6 +61,22 @@ func New(config Config) (*Client, error) {
 }
 
 func (c *Client) Send(ctx context.Context, to, subject, text string) error {
+	return c.send(ctx, to, subject, func(from, recipient *stdmail.Address) ([]byte, error) {
+		return buildMessage(from, recipient, subject, text)
+	})
+}
+
+func (c *Client) SendHTML(ctx context.Context, to, subject, text, html string) error {
+	return c.send(ctx, to, subject, func(from, recipient *stdmail.Address) ([]byte, error) {
+		return buildHTMLMessage(from, recipient, subject, text, html)
+	})
+}
+
+func (c *Client) send(
+	ctx context.Context,
+	to, subject string,
+	build func(from, recipient *stdmail.Address) ([]byte, error),
+) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -69,7 +87,7 @@ func (c *Client) Send(ctx context.Context, to, subject, text string) error {
 	if err != nil {
 		return fmt.Errorf("parse mail recipient: %w", err)
 	}
-	message, err := buildMessage(c.from, recipient, subject, text)
+	message, err := build(c.from, recipient)
 	if err != nil {
 		return err
 	}
@@ -138,11 +156,7 @@ func smtpError(ctx context.Context, operation string, err error) error {
 
 func buildMessage(from, to *stdmail.Address, subject, text string) ([]byte, error) {
 	var message bytes.Buffer
-	fmt.Fprintf(&message, "From: %s\r\n", from.String())
-	fmt.Fprintf(&message, "To: %s\r\n", to.String())
-	fmt.Fprintf(&message, "Subject: %s\r\n", mime.QEncoding.Encode("UTF-8", subject))
-	fmt.Fprintf(&message, "Date: %s\r\n", time.Now().Format(time.RFC1123Z))
-	message.WriteString("MIME-Version: 1.0\r\n")
+	writeHeaders(&message, from, to, subject)
 	message.WriteString("Content-Type: text/plain; charset=UTF-8\r\n")
 	message.WriteString("Content-Transfer-Encoding: quoted-printable\r\n\r\n")
 	writer := quotedprintable.NewWriter(&message)
@@ -153,4 +167,51 @@ func buildMessage(from, to *stdmail.Address, subject, text string) ([]byte, erro
 		return nil, fmt.Errorf("close mail text encoder: %w", err)
 	}
 	return message.Bytes(), nil
+}
+
+func buildHTMLMessage(from, to *stdmail.Address, subject, text, html string) ([]byte, error) {
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	if err := writeMultipartPart(writer, "text/plain", text); err != nil {
+		return nil, err
+	}
+	if err := writeMultipartPart(writer, "text/html", html); err != nil {
+		return nil, err
+	}
+	if err := writer.Close(); err != nil {
+		return nil, fmt.Errorf("close mail multipart writer: %w", err)
+	}
+
+	var message bytes.Buffer
+	writeHeaders(&message, from, to, subject)
+	fmt.Fprintf(&message, "Content-Type: multipart/alternative; boundary=%q\r\n\r\n", writer.Boundary())
+	message.Write(body.Bytes())
+	return message.Bytes(), nil
+}
+
+func writeHeaders(message *bytes.Buffer, from, to *stdmail.Address, subject string) {
+	fmt.Fprintf(message, "From: %s\r\n", from.String())
+	fmt.Fprintf(message, "To: %s\r\n", to.String())
+	fmt.Fprintf(message, "Subject: %s\r\n", mime.QEncoding.Encode("UTF-8", subject))
+	fmt.Fprintf(message, "Date: %s\r\n", time.Now().Format(time.RFC1123Z))
+	message.WriteString("MIME-Version: 1.0\r\n")
+}
+
+func writeMultipartPart(writer *multipart.Writer, contentType, content string) error {
+	header := make(textproto.MIMEHeader)
+	header.Set("Content-Type", contentType+"; charset=UTF-8")
+	header.Set("Content-Transfer-Encoding", "quoted-printable")
+	part, err := writer.CreatePart(header)
+	if err != nil {
+		return fmt.Errorf("create %s mail part: %w", contentType, err)
+	}
+	encoder := quotedprintable.NewWriter(part)
+	if _, err := encoder.Write([]byte(content)); err != nil {
+		_ = encoder.Close()
+		return fmt.Errorf("encode %s mail part: %w", contentType, err)
+	}
+	if err := encoder.Close(); err != nil {
+		return fmt.Errorf("close %s mail part encoder: %w", contentType, err)
+	}
+	return nil
 }
