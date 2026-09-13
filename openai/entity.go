@@ -31,13 +31,18 @@ func AssistantMessage(content string) *Message {
 	return NewMessage(RAssistant, content)
 }
 
+type Reasoning struct {
+	Effort string `json:"effort,omitempty"` // minimal/low/medium/high/max; none 表示关闭思考模式
+}
+
 type Request struct {
-	Model        string   `json:"model"`
-	Instructions string   `json:"instructions,omitempty"`
-	Input        Input    `json:"input"`
-	Temperature  *float64 `json:"temperature,omitempty"`
-	Stream       *bool    `json:"stream,omitempty"`
-	Store        *bool    `json:"store,omitempty"`
+	Model        string     `json:"model"`
+	Instructions string     `json:"instructions,omitempty"`
+	Input        Input      `json:"input"`
+	Reasoning    *Reasoning `json:"reasoning,omitempty"`
+	Temperature  *float64   `json:"temperature,omitempty"`
+	Stream       *bool      `json:"stream,omitempty"`
+	Store        *bool      `json:"store,omitempty"`
 }
 
 type ChatRequest struct {
